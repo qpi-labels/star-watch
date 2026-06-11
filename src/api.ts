@@ -138,7 +138,7 @@ export function calculateLimitingMagnitude(weather: WeatherData | null, bortle: 
   return Math.max(0, mag);
 }
 
-export async function fetchBortleScale(lat: number, lon: number): Promise<number> {
+export async function fetchBortleScale(lat: number, lon: number): Promise<number | null> {
   const formattedLat = lat.toFixed(2);
   const formattedLon = lon.toFixed(2);
   const url = `/api-clearoutside/forecast/${formattedLat}/${formattedLon}`;
@@ -159,9 +159,9 @@ export async function fetchBortleScale(lat: number, lon: number): Promise<number
         return bortleValue;
       }
     }
-    return 6; // 매칭 안 될 경우 기본값
+    return null; // 매칭 안 될 경우 null
   } catch (error) {
     console.error("Bortle scale fetch failed:", error);
-    return 6; // 에러 시 기본값
+    return null; // 에러 시 null
   }
 }
