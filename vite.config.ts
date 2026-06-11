@@ -10,6 +10,11 @@ export default defineConfig({
         target: 'https://apihub.kma.go.kr',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api-kma/, ''),
+      },
+      '/api-clearoutside': {
+        target: 'https://clearoutside.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api-clearoutside/, ''),
       }
     }
   }

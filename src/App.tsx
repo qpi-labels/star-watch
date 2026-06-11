@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { WeatherData, StarData } from './types';
-import { fetchWeatherData, calculateLimitingMagnitude, brightStars } from './api';
+import { fetchWeatherData, calculateLimitingMagnitude, brightStars, fetchBortleScale } from './api';
 
 interface PresetLocation {
   name: string;
@@ -83,6 +83,8 @@ const App: React.FC = () => {
     try {
       const data = await fetchWeatherData(targetLat, targetLon);
       setWeather(data);
+      const fetchedBortle = await fetchBortleScale(targetLat, targetLon);
+      setBortle(fetchedBortle);
     } catch (error: any) {
       console.error(error);
       const errMsg = error.message || "";

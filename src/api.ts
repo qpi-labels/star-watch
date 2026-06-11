@@ -137,3 +137,31 @@ export function calculateLimitingMagnitude(weather: WeatherData | null, bortle: 
 
   return Math.max(0, mag);
 }
+
+export async function fetchBortleScale(lat: number, lon: number): Promise<number> {
+  const formattedLat = lat.toFixed(2);
+  const formattedLon = lon.toFixed(2);
+  const url = `/api-clearoutside/forecast/${formattedLat}/${formattedLon}`;
+  
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Failed to fetch Bortle data');
+    const html = await res.text();
+    
+    // HTML에서 "Class X Bortle" 패턴 탐색
+    const match = html.match(/Class\s+<strong>(\d+)<\/strong>\s+Bortle/i) || 
+                  html.match(/Class\s+(\d+)\s+Bortle/i) ||
+                  html.match(/btn-bortle-(\d+)/i);
+                  
+    if (match && match[1]) {
+      const bortleValue = parseInt(match[1], 10);
+      if (bortleValue >= 1 && bortleValue <= 9) {
+        return bortleValue;
+      }
+    }
+    return 6; // 매칭 안 될 경우 기본값
+  } catch (error) {
+    console.error("Bortle scale fetch failed:", error);
+    return 6; // 에러 시 기본값
+  }
+}
