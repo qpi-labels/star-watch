@@ -254,7 +254,8 @@ const App: React.FC = () => {
   const [manualReh, setManualReh] = useState<number>(50);
   const [manualPty, setManualPty] = useState<number>(0);
   const [manualT1h, setManualT1h] = useState<number>(20);
-
+  const [manualPm10, setManualPm10] = useState<number>(30);
+ 
   useEffect(() => {
     let weatherObj: WeatherData | null = null;
     if (mode === 'api') {
@@ -265,10 +266,12 @@ const App: React.FC = () => {
         SKY: manualSky,
         REH: manualReh,
         PTY: manualPty,
-        T1H: manualT1h
+        T1H: manualT1h,
+        PM10: manualPm10,
+        pm10StationName: "시뮬레이션 측정소"
       };
     }
-
+ 
     if (weatherObj) {
       const mag = calculateLimitingMagnitude(weatherObj, bortle);
       setLimitingMag(mag);
@@ -280,7 +283,7 @@ const App: React.FC = () => {
       setLimitingMag(0);
       setStars([]);
     }
-  }, [mode, weather, bortle, manualSky, manualReh, manualPty, manualT1h]);
+  }, [mode, weather, bortle, manualSky, manualReh, manualPty, manualT1h, manualPm10]);
 
   const handlePresetChange = (index: number) => {
     setPresetIndex(index);
@@ -369,7 +372,23 @@ const App: React.FC = () => {
   const displayReh = mode === 'api' ? (weather?.REH ?? 50) : manualReh;
   const displayPty = mode === 'api' ? (weather?.PTY ?? 0) : manualPty;
   const displayT1h = mode === 'api' ? (weather?.T1H ?? 20) : manualT1h;
+  const displayPm10 = mode === 'api' ? weather?.PM10 : manualPm10;
+  const displayPm10Station = mode === 'api' ? (weather?.pm10StationName ?? '-') : '시뮬레이션 측정소';
   const displayTime = mode === 'api' ? (weather ? new Date(weather.time).toLocaleTimeString() : '-') : '실시간 시뮬레이션 중';
+ 
+  const getPm10StatusText = (val: number) => {
+    if (val <= 30) return "좋음";
+    if (val <= 80) return "보통";
+    if (val <= 150) return "나쁨";
+    return "매우나쁨";
+  };
+ 
+  const getPm10Color = (val: number) => {
+    if (val <= 30) return "#00ffd0";
+    if (val <= 80) return "#2bff00";
+    if (val <= 150) return "#ffbb00";
+    return "#ff0000";
+  };
 
   return (
     <div className="pdf-app">
@@ -582,6 +601,34 @@ const App: React.FC = () => {
                   />
                 </div>
               </div>
+
+              {/* PM10 slider */}
+              <div className="pdf-flex-col pdf-gap-050">
+                <label className="pdf-text-label-14-mono pdf-text-muted">
+                  미세먼지 (PM10): <span style={{ color: getPm10Color(manualPm10), fontWeight: 'bold' }}>{manualPm10} ㎍/㎥ ({getPm10StatusText(manualPm10)})</span>
+                </label>
+                <div className="range-container">
+                  <input 
+                    type="range" 
+                    min="0" 
+                    max="300" 
+                    value={manualPm10} 
+                    onChange={(e) => setManualPm10(Number(e.target.value))} 
+                    className="range-slider"
+                  />
+                </div>
+                {manualPm10 > 30 && (
+                  <span className="pdf-text-copy-13-mono" style={{ fontSize: '10px', color: getPm10Color(manualPm10) }}>
+                    ⚠️ 대기 혼탁 페널티 적용 (-{
+                      manualPm10 <= 80 
+                        ? (((manualPm10 - 30) / 50) * 0.3).toFixed(2) 
+                        : manualPm10 <= 150 
+                        ? (0.3 + ((manualPm10 - 80) / 70) * 0.7).toFixed(2) 
+                        : (1.0 + Math.min(1.5, ((manualPm10 - 150) / 150) * 1.5)).toFixed(2)
+                    })
+                  </span>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -649,9 +696,19 @@ const App: React.FC = () => {
                     <span className="pdf-text-copy-14 pdf-text-muted">기온</span>
                     <strong className="pdf-text-copy-14">{displayT1h}℃</strong>
                   </div>
-                  <div className="pdf-flex-row pdf-justify-between">
+                  <div className="pdf-flex-row pdf-justify-between pdf-border-bottom pdf-pb-100">
                     <span className="pdf-text-copy-14 pdf-text-muted">강수 감지</span>
                     <strong className="pdf-text-copy-14">{displayPty === 0 ? '없음' : '강수 감지'}</strong>
+                  </div>
+                  <div className="pdf-flex-row pdf-justify-between pdf-border-bottom pdf-pb-100">
+                    <span className="pdf-text-copy-14 pdf-text-muted">미세먼지 (PM10)</span>
+                    <strong className="pdf-text-copy-14" style={{ color: displayPm10 !== undefined ? getPm10Color(displayPm10) : 'inherit' }}>
+                      {displayPm10 !== undefined ? `${displayPm10} ㎍/㎥ (${getPm10StatusText(displayPm10)})` : 'N/A'}
+                    </strong>
+                  </div>
+                  <div className="pdf-flex-row pdf-justify-between">
+                    <span className="pdf-text-copy-14 pdf-text-muted">PM10 측정소</span>
+                    <strong className="pdf-text-copy-14">{displayPm10Station}</strong>
                   </div>
                 </div>
               </div>
