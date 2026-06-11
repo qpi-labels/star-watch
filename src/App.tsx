@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { WeatherData, StarData } from './types';
 import { fetchWeatherData, calculateLimitingMagnitude, brightStars, fetchBortleScale } from './api';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
 interface PresetLocation {
   name: string;
@@ -31,6 +33,210 @@ const App: React.FC = () => {
   const [stars, setStars] = useState<StarData[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
+
+  const mapRef = useRef<L.Map | null>(null);
+  const markerRef = useRef<L.Marker | null>(null);
+  const circleCoreRef = useRef<L.Circle | null>(null);
+  const circleInnerRef = useRef<L.Circle | null>(null);
+  const circleOuterRef = useRef<L.Circle | null>(null);
+
+  const modeRef = useRef(mode);
+  const handleFetchRef = useRef(handleFetchLiveWeather);
+
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+
+  useEffect(() => {
+    handleFetchRef.current = handleFetchLiveWeather;
+  }, [handleFetchLiveWeather]);
+
+  // Helper to get Bortle-specific color
+  const getBortleColor = (b: number) => {
+    if (b <= 2) return '#00ffd0'; // 청정 지역 (Teal)
+    if (b <= 4) return '#2bff00'; // 외곽/시골 (Green)
+    if (b <= 6) return '#ffbb00'; // 도심 경계 (Yellow/Orange)
+    if (b <= 8) return '#ff5500'; // 도심 (Orange)
+    return '#ff0000'; // 도심 중심 (Red)
+  };
+
+  // Initialize Leaflet Map (persistent across modes)
+  useEffect(() => {
+    const initialLat = lat || 37.5665;
+    const initialLon = lon || 126.9780;
+
+    const timer = setTimeout(() => {
+      if (mapRef.current) return;
+
+      const map = L.map('map').setView([initialLat, initialLon], 10);
+      mapRef.current = map;
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap'
+      }).addTo(map);
+
+      // Custom red glowing dot marker matching PDF-DS red
+      const customIcon = L.divIcon({
+        className: 'custom-div-icon',
+        html: `<div style="background-color: var(--color-functional-red); width: 14px; height: 14px; border: 2px solid white; border-radius: 50%; box-shadow: var(--shadow-functional-glow);"></div>`,
+        iconSize: [14, 14],
+        iconAnchor: [7, 7]
+      });
+
+      const marker = L.marker([initialLat, initialLon], {
+        draggable: true,
+        icon: customIcon
+      }).addTo(map);
+      markerRef.current = marker;
+
+      // 3-Layer Light Pollution Dome
+      const initialColor = getBortleColor(bortle);
+      
+      const circleCore = L.circle([initialLat, initialLon], {
+        radius: bortle * 300,
+        fillColor: initialColor,
+        fillOpacity: 0.4,
+        color: initialColor,
+        weight: 1
+      }).addTo(map);
+      circleCoreRef.current = circleCore;
+
+      const circleInner = L.circle([initialLat, initialLon], {
+        radius: bortle * 800,
+        fillColor: initialColor,
+        fillOpacity: 0.2,
+        color: initialColor,
+        weight: 1
+      }).addTo(map);
+      circleInnerRef.current = circleInner;
+
+      const circleOuter = L.circle([initialLat, initialLon], {
+        radius: bortle * 2000,
+        fillColor: initialColor,
+        fillOpacity: 0.08,
+        color: initialColor,
+        weight: 1.5,
+        dashArray: '5, 10'
+      }).addTo(map);
+      circleOuterRef.current = circleOuter;
+
+      // Bind dynamic popup
+      const updatePopup = (bVal: number) => {
+        const popupContent = `
+          <div style="font-family: var(--font-sans); color: #09090b; font-size: 12px; padding: 4px; line-height: 1.4;">
+            <strong style="color: var(--color-functional-red); font-size: 13px;">Bortle ${bVal} 광공해 돔</strong><br/>
+            • 핵심 영역: ${(bVal * 0.3).toFixed(1)}km<br/>
+            • 확산 영향권: ${(bVal * 2.0).toFixed(1)}km
+          </div>
+        `;
+        marker.bindPopup(popupContent);
+        circleOuter.bindPopup(popupContent);
+      };
+      updatePopup(bortle);
+
+      // Handle map clicks
+      map.on('click', (e: L.LeafletMouseEvent) => {
+        const { lat: clickLat, lng: clickLon } = e.latlng;
+        marker.setLatLng([clickLat, clickLon]);
+        circleCore.setLatLng([clickLat, clickLon]);
+        circleInner.setLatLng([clickLat, clickLon]);
+        circleOuter.setLatLng([clickLat, clickLon]);
+        
+        setInputLat(clickLat.toFixed(4));
+        setInputLon(clickLon.toFixed(4));
+        setLat(clickLat);
+        setLon(clickLon);
+        setPresetIndex(0);
+
+        if (modeRef.current === 'api') {
+          handleFetchRef.current(clickLat, clickLon);
+        }
+      });
+
+      // Handle marker drag
+      marker.on('dragend', () => {
+        const position = marker.getLatLng();
+        circleCore.setLatLng(position);
+        circleInner.setLatLng(position);
+        circleOuter.setLatLng(position);
+        
+        setInputLat(position.lat.toFixed(4));
+        setInputLon(position.lng.toFixed(4));
+        setLat(position.lat);
+        setLon(position.lng);
+        setPresetIndex(0);
+
+        if (modeRef.current === 'api') {
+          handleFetchRef.current(position.lat, position.lng);
+        }
+      });
+    }, 100);
+
+    return () => {
+      clearTimeout(timer);
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+        markerRef.current = null;
+        circleCoreRef.current = null;
+        circleInnerRef.current = null;
+        circleOuterRef.current = null;
+      }
+    };
+  }, []);
+
+  // Sync map view, marker, and light pollution circles when coordinates or bortle scale updates
+  useEffect(() => {
+    if (lat !== null && lon !== null && mapRef.current) {
+      if (markerRef.current) {
+        markerRef.current.setLatLng([lat, lon]);
+      }
+      
+      const color = getBortleColor(bortle);
+      
+      if (circleCoreRef.current) {
+        circleCoreRef.current.setLatLng([lat, lon]);
+        circleCoreRef.current.setRadius(bortle * 300);
+        circleCoreRef.current.setStyle({
+          fillColor: color,
+          color: color,
+          fillOpacity: 0.4
+        });
+      }
+      
+      if (circleInnerRef.current) {
+        circleInnerRef.current.setLatLng([lat, lon]);
+        circleInnerRef.current.setRadius(bortle * 800);
+        circleInnerRef.current.setStyle({
+          fillColor: color,
+          color: color,
+          fillOpacity: 0.2
+        });
+      }
+
+      if (circleOuterRef.current) {
+        circleOuterRef.current.setLatLng([lat, lon]);
+        circleOuterRef.current.setRadius(bortle * 2000);
+        circleOuterRef.current.setStyle({
+          fillColor: color,
+          color: color,
+          fillOpacity: 0.08
+        });
+      }
+
+      const popupContent = `
+        <div style="font-family: var(--font-sans); color: #09090b; font-size: 12px; padding: 4px; line-height: 1.4;">
+          <strong style="color: var(--color-functional-red); font-size: 13px;">Bortle ${bortle} 광공해 돔</strong><br/>
+          • 핵심 영역: ${(bortle * 0.3).toFixed(1)}km<br/>
+          • 확산 영향권: ${(bortle * 2.0).toFixed(1)}km
+        </div>
+      `;
+      if (markerRef.current) markerRef.current.bindPopup(popupContent);
+      if (circleOuterRef.current) circleOuterRef.current.bindPopup(popupContent);
+      
+      mapRef.current.setView([lat, lon], mapRef.current.getZoom());
+    }
+  }, [lat, lon, bortle]);
 
   // 초기 진입 시 서울시청 기상 정보 자동 조회
   useEffect(() => {
@@ -89,13 +295,15 @@ const App: React.FC = () => {
     }
   };
 
-  const handleFetchLiveWeather = async (targetLat: number, targetLon: number) => {
+  async function handleFetchLiveWeather(targetLat: number, targetLon: number) {
     setLoading(true);
     try {
       const data = await fetchWeatherData(targetLat, targetLon);
       setWeather(data);
       const fetchedBortle = await fetchBortleScale(targetLat, targetLon);
-      setBortle(fetchedBortle);
+      if (fetchedBortle !== null) {
+        setBortle(fetchedBortle);
+      }
     } catch (error: any) {
       console.error(error);
       const errMsg = error.message || "";
@@ -288,6 +496,8 @@ const App: React.FC = () => {
                 </div>
               </div>
 
+
+
               {/* Action Buttons */}
               <div className="pdf-flex-col pdf-gap-100 pdf-mt-100">
                 <button 
@@ -446,6 +656,53 @@ const App: React.FC = () => {
                 </div>
               </div>
 
+            </div>
+
+            {/* OSM Interactive Map Overlay Visualizer */}
+            <div className="pdf-panel" style={{ padding: '24px', position: 'relative' }}>
+              <div className="pdf-panel-header pdf-flex-row pdf-justify-between pdf-items-center" style={{ borderBottom: '1px solid var(--color-border-default)', paddingBottom: '12px', marginBottom: '16px' }}>
+                <h3 className="pdf-text-label-16 pdf-font-bold">광공해 돔 시각화 지도 (Bortle Light Pollution Dome Overlay Map)</h3>
+                <span className="pdf-badge" style={{ backgroundColor: 'var(--color-functional-red)', color: 'white', border: 'none' }}>OSM OVERLAY</span>
+              </div>
+              <p className="pdf-text-copy-14 pdf-text-muted pdf-mb-200">
+                선택한 관측지 주변의 Bortle 등급별 광공해 돔(Dome)의 확산 범위를 시각화합니다. 지도 위를 클릭하거나 빨간 마커를 직접 드래그하여 임의의 관측 지점을 선택할 수 있습니다.
+              </p>
+              <div id="map" style={{ height: '380px', borderRadius: '8px', border: '1px solid var(--color-border-default)', zIndex: 1, position: 'relative' }}></div>
+              
+              {/* Bortle Scale Color Spectrum Legend */}
+              <div className="map-legend-container" style={{
+                marginTop: '16px',
+                padding: '12px',
+                backgroundColor: 'var(--color-bg-secondary)',
+                borderRadius: '6px',
+                border: '1px solid var(--color-border-default)'
+              }}>
+                <div className="pdf-text-label-14-mono pdf-font-bold pdf-mb-100" style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--color-text-primary)' }}>
+                  <span style={{ color: 'var(--color-functional-red)' }}>●</span> BORTLE SCALE COLOR SPECTRUM
+                </div>
+                <div className="pdf-flex-row pdf-gap-150 pdf-flex-wrap" style={{ fontSize: '11px', rowGap: '8px' }}>
+                  <div className="pdf-flex-row pdf-items-center pdf-gap-050">
+                    <span style={{ display: 'inline-block', width: '10px', height: '10px', backgroundColor: '#00ffd0', borderRadius: '50%' }}></span>
+                    <span className="pdf-text-muted">Class 1-2 (청정 밤하늘)</span>
+                  </div>
+                  <div className="pdf-flex-row pdf-items-center pdf-gap-050">
+                    <span style={{ display: 'inline-block', width: '10px', height: '10px', backgroundColor: '#2bff00', borderRadius: '50%' }}></span>
+                    <span className="pdf-text-muted">Class 3-4 (외곽/시골)</span>
+                  </div>
+                  <div className="pdf-flex-row pdf-items-center pdf-gap-050">
+                    <span style={{ display: 'inline-block', width: '10px', height: '10px', backgroundColor: '#ffbb00', borderRadius: '50%' }}></span>
+                    <span className="pdf-text-muted">Class 5-6 (도심 경계)</span>
+                  </div>
+                  <div className="pdf-flex-row pdf-items-center pdf-gap-050">
+                    <span style={{ display: 'inline-block', width: '10px', height: '10px', backgroundColor: '#ff5500', borderRadius: '50%' }}></span>
+                    <span className="pdf-text-muted">Class 7-8 (밝은 도심)</span>
+                  </div>
+                  <div className="pdf-flex-row pdf-items-center pdf-gap-050">
+                    <span style={{ display: 'inline-block', width: '10px', height: '10px', backgroundColor: '#ff0000', borderRadius: '50%' }}></span>
+                    <span className="pdf-text-muted">Class 9 (극심한 광공해)</span>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Observable star list panel */}
